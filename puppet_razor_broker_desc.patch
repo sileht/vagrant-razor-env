@@ -1,0 +1,16 @@
+diff --git a/lib/puppet/type/rz_broker.rb b/lib/puppet/type/rz_broker.rb
+index f5647ba..023fbc9 100644
+--- a/lib/puppet/type/rz_broker.rb
++++ b/lib/puppet/type/rz_broker.rb
+@@ -14,6 +14,11 @@ EOT
+     newvalues(/\w+/)
+   end
+ 
++  newproperty(:description) do
++    desc "The broker description."
++    newvalues(/\w+/)
++  end
++
+   newproperty(:plugin) do
+     desc "The broker plugin."
+     newvalues(/\w+/)

@@ -1,0 +1,22 @@
+diff --git a/manifests/init.pp b/manifests/init.pp
+index ee90e54..8eb8b20 100644
+--- a/manifests/init.pp
++++ b/manifests/init.pp
+@@ -57,7 +57,7 @@ class nodejs(
+ 
+   package { 'nodejs':
+     name    => $nodejs::params::node_pkg,
+-    ensure  => present,
++    ensure  => held,
+     require => Anchor['nodejs::repo']
+   }
+ 
+@@ -70,7 +70,7 @@ class nodejs(
+   if $dev_package and $nodejs::params::dev_pkg {
+     package { 'nodejs-dev':
+       name    => $nodejs::params::dev_pkg,
+-      ensure  => present,
++      ensure  => held,
+       require => Anchor['nodejs::repo']
+     }
+   }

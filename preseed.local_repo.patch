@@ -1,0 +1,16 @@
+diff --git a/lib/project_razor/model/debian/wheezy/preseed.erb b/lib/project_razor/model/debian/wheezy/preseed.erb
+index 56a2d84..6e218b4 100644
+--- a/lib/project_razor/model/debian/wheezy/preseed.erb
++++ b/lib/project_razor/model/debian/wheezy/preseed.erb
+@@ -7,9 +7,9 @@ d-i netcfg/choose_interface select auto
+ d-i netcfg/get_hostname string <%= hostname %>
+ d-i netcfg/get_domain string puppetlabs.lan
+ d-i netcfg/no_default_route boolean true
+-d-i mirror/country string US
++d-i mirror/country string manual
+ d-i mirror/protocol string http
+-d-i mirror/http/mirror string ftp.us.debian.org
++d-i mirror/http/hostname string 192.168.100.1
+ d-i mirror/http/directory string /debian/
+ d-i mirror/http/proxy string
+ d-i mirror/suite string wheezy

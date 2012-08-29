@@ -28,8 +28,8 @@ node /^puppet/ {
 		mk_name => "rz_mk_prod-image.0.9.0.5.iso",
 		mk_source => "/vagrant/rz_mk_prod-image.0.9.0.5.iso",
   		server_opts_hash => { 'mk_log_level' => 'Logger::DEBUG' },
-#		git_source => "git@github.com:sileht/Razor.git",
-#		git_revision => "master",
+		git_source => "https://github.com/sileht/Razor.git",
+		git_revision => "master",
 	}
 
 	rz_image { "debian-wheezy-netboot-amd64.iso":
@@ -39,7 +39,6 @@ node /^puppet/ {
 #		source  => "http://ftp.debian.org/debian/dists/wheezy/main/installer-amd64/current/images/netboot/mini.iso",
 		source  => "/vagrant/mini.iso",
 	}
-
 
 	rz_model { 'controller_model':
 	  ensure      => present,

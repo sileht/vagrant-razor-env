@@ -12,8 +12,8 @@ deb-src http://192.168.100.1/debian/ wheezy main
 deb http://192.168.100.1/debian/ sid main
 deb-src http://192.168.100.1/debian/ sid main
 
-deb http://192.168.100.1/security wheezy/updates main
-deb-src http://192.168.100.1/security wheezy/updates main
+#deb http://192.168.100.1/security wheezy/updates main
+#deb-src http://192.168.100.1/security wheezy/updates main
 EOF
 
 export DEBIAN_FRONTEND=noninteractive
@@ -34,12 +34,13 @@ EOF
 
 . /etc/profile.d/eatmydata.sh
 
+ip_eth1=$(ip -o -4 a  show dev eth1  | sed -n 's,.*inet \(.*\)/24.*,\1,p')
+sed -i -e "s/127.0.1.1/$ip_eth1/" /etc/hosts
+
 apt-get install -y dnsmasq curl vim screen git
 
 git config --global user.email "sileht@sileht.net" 
 git config --global user.name "Mehdi Abaakouk"
 
-ip_eth1=$(ip -o -4 a  show dev eth1  | sed -n 's,.*inet \(.*\)/24.*,\1,p')
-sed -i -e "s/127.0.1.1/$ip_eth1/" /etc/hosts
 
 

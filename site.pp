@@ -5,7 +5,7 @@ node /^puppet/ {
 	dhcp::pool{ 'razor.lan':
 		network => '192.168.100.0',
 		mask    => '255.255.255.0',
-		range   => '192.168.100.100 192.168.100.200',
+		range   => '192.168.100.150 192.168.100.200',
 		gateway => '192.168.100.1',
 	}
 	class { 'dhcp':
@@ -516,9 +516,11 @@ node /^controller/ {
 	$ipaddress_eth1 = "192.168.100.100"
 	$ipaddress = $ipaddress_eth0
 
+	exec{"killall dhclient": onlyif => "pidof dhclient" }
 	class {"openstack_network": }
 
 	include role_nova_controller_multihost
+
 }
 
 node /^compute/ {
@@ -527,6 +529,8 @@ node /^compute/ {
 	$ipaddress_eth0 = "10.142.6.3$nodeid"
 	$ipaddress_eth1 = "192.168.100.3$nodeid"
 	$ipaddress = $ipaddress_eth0
+	
+	exec{"killall dhclient": onlyif => "pidof dhclient" }
 	class {"openstack_network": }
 
 	include role_nova_compute_multihost

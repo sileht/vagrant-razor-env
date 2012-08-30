@@ -6,16 +6,16 @@ Acquire::PDiffs "false";
 Acquire::Languages "none";
 EOF
 
+# puppet module nodejs use ftp.us.debian.org to install the nodejs package
 cat > /etc/apt/sources.list <<EOF
 deb http://192.168.100.1/debian/ wheezy main
-deb-src http://192.168.100.1/debian/ wheezy main
-deb http://192.168.100.1/debian/ sid main
-deb-src http://192.168.100.1/debian/ sid main
-
+deb http://ftp.us.debian.org/debian/ sid main
 #deb http://192.168.100.1/security wheezy/updates main
-#deb-src http://192.168.100.1/security wheezy/updates main
 EOF
 
+echo >> /etc/hosts <<EOF
+192.168.100.1 ftp.us.debian.org
+EOF
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update -y

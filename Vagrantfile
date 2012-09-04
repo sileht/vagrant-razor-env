@@ -8,7 +8,7 @@ Vagrant::Config.run do |env_config|
         config.vm.host_name = "puppet.razor.lan"
         config.vm.network :hostonly, "192.168.100.2", :adapter => 2
         config.ssh.username = 'root'
-        config.vm.customize ["modifyvm", :id, "--memory", 1024]
+        config.vm.customize ["modifyvm", :id, "--memory", 2048]
         config.vm.provision :shell, :path => "deploy_env.sh"
         config.vm.provision :shell, :path => "deploy_puppet_razor.sh"
         config.vm.provision :shell, :path => "deploy_post_env.sh"
@@ -21,7 +21,7 @@ Vagrant::Config.run do |env_config|
         config.vm.customize ["modifyvm", :id, "--memory", 1024]
         config.ssh.port = 22
         config.ssh.max_tries = 0
-        config.vm.boot_mode = :gui
+#        config.vm.boot_mode = :gui
     end
 
     env_config.vm.define "compute2" do |config|
@@ -39,7 +39,7 @@ Vagrant::Config.run do |env_config|
         config.vm.network :hostonly, "192.168.100.22", :adapter => 1, :mac => "080027649A22"
         config.vm.network :hostonly, "192.168.100.72", :adapter => 2, :mac => "080027649B22"
         config.vm.host_name = "controller1.razor.lan"
-        config.vm.customize ["modifyvm", :id, "--memory", 512]
+        config.vm.customize ["modifyvm", :id, "--memory", 1536]
         config.ssh.port = 22
         config.ssh.max_tries = 0
 #        config.vm.boot_mode = :gui

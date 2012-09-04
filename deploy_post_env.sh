@@ -1,7 +1,10 @@
 #!/bin/bash
 
 cd /opt/razor/
-patch -p1  < /vagrant/preseed.local_repo.patch # < not in wiki this my debian repo :)
+patch -p1 < /vagrant/razor_preseed.local_repo.patch # < not in wiki this my debian repo :)
+patch -p1 < /vagrant/razor_force_loglevel.rb
+patch -p1 < /vagrant/razor_wait_link_configuration.patch
+patch -p1 < /vagrant/razor_eatmydata_puppet.patch
 /opt/razor/bin/razor_daemon.rb restart
 
 gem install rspec

@@ -1,0 +1,25 @@
+diff --git a/lib/project_razor/model/debian/wheezy/os_boot.erb b/lib/project_razor/model/debian/wheezy/os_boot.erb
+index 2fb1a2f..450e7fe 100644
+--- a/lib/project_razor/model/debian/wheezy/os_boot.erb
++++ b/lib/project_razor/model/debian/wheezy/os_boot.erb
+@@ -1,5 +1,11 @@
+ #!/bin/bash
+ 
++wait_link_configured(){
++	while [ -z "$(ip r)" ] ; do
++		sleep 1
++	done
++}
++
+ check_status(){
+ 	status=$?
+ 	step="$1"
+@@ -24,6 +30,8 @@ cp -p /etc/hosts /etc/hosts-
+ sed -i -e '/^127\.0\.1\.1/s/.*/127.0.1.1	<%= hostname %>.<%= domainname %>	<%= hostname %>/' /etc/hosts
+ check_status "set_hostname"
+ 
++wait_link_configured
++
+ apt-get -y update
+ check_status "apt_update"
+ 

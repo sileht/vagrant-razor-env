@@ -68,7 +68,7 @@ node /^puppet/ {
 	  broker  => 'puppet_broker',
 	  model   => 'controller_model',
 	  enabled => 'true',
-	  tags    => ['memsize_500MiB','nics_2'],
+	  tags    => ['memsize_1511MiB','nics_2'],
 	  template => 'linux_deploy',
 	  maximum => 1,
 	}
@@ -93,11 +93,15 @@ class openstack_network {
               "address" => $ipaddress_eth0,
               "netmask" => "255.255.255.0",
             },
+
+#            "eth1" => {
+#              "method" => "static",
+#              "address" => $ipaddress_eth1,
+#              "netmask" => "255.255.255.0",
+#              "gateway" => "192.168.100.1"
+#            },
             "eth1" => {
-              "method" => "static",
-              "address" => $ipaddress_eth1,
-              "netmask" => "255.255.255.0",
-              "gateway" => "192.168.100.1"
+	      "method" => "dhcp",
             },
           },
           auto => ["eth0", "eth1"],
@@ -512,10 +516,12 @@ class role_nova_compute_multihost {
 }
 
 node /^controller/ {	
-	$ipaddress_eth0 = "10.142.6.33"
+	$ipaddress_eth0 = "10.142.6.10"
 	$ipaddress_eth1 = "192.168.100.100"
 	$ipaddress = $ipaddress_eth0
 
+	# this break the razor broker because network are down while broker wait for the return of puppet
+	# a better is to setup the network in the razor model but it is not already cutomisable
 	exec{"killall dhclient": onlyif => "pidof dhclient" }
 	class {"openstack_network": }
 
@@ -526,11 +532,11 @@ node /^controller/ {
 node /^compute/ {
 
 	$nodeid = split($hostname, 'compute')
-	$ipaddress_eth0 = "10.142.6.3$nodeid"
-	$ipaddress_eth1 = "192.168.100.3$nodeid"
+	$ipaddress_eth0 = "10.142.6.1$nodeid"
+	#$ipaddress_eth1 = "192.168.100.1$nodeid"
 	$ipaddress = $ipaddress_eth0
 	
-	exec{"killall dhclient": onlyif => "pidof dhclient" }
+	#exec{"killall dhclient": onlyif => "pidof dhclient" }
 	class {"openstack_network": }
 
 	include role_nova_compute_multihost

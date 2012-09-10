@@ -2,14 +2,7 @@
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-
-# node js fixup
-dpkg -i /vagrant/nodejs*.deb
-echo 'nodejs hold' | dpkg --set-selections
-echo 'nodejs-dev hold' | dpkg --set-selections
-apt-get install -f -y
-apt-get install -y npm
-
+apt-get upgrade -y
 
 # wiki part
 apt-get install -y puppet augeas-tools puppetmaster sqlite3 libsqlite3-ruby libactiverecord-ruby git libmysql-ruby mysql-server mysql-client rubygems
@@ -64,6 +57,7 @@ git submodule add https://github.com/attachmentgenie/puppet-module-network.git n
 (cd tftp && git checkout 0.2.1)
 (cd ruby && git checkout 0.0.2)
 (cd sudo && git checkout v2.0.0)
+(cd xinetd && git pull origin master) # not yet in wiki
 
 # Held on the working nodejs
 (cd nodejs && patch -p1 < /vagrant/nodejs.patch)
@@ -78,6 +72,13 @@ curl https://github.com/puppetlabs/puppetlabs-razor/pull/64.patch | git am
 patch -p1 < /vagrant/puppet_razor_broker_desc.patch # < not in wiki waiting for upstream fix in 48.patch
 
 cd - 
+
+# node js fixup
+apt-get install libc-ares-dev libev-dev libssl-dev libv8-dev libv8-3.8.9.20 libev4 libc-ares2 zlib1g-dev libssl-doc
+dpkg -i /vagrant/nodejs*.deb
+echo 'nodejs hold' | dpkg --set-selections
+echo 'nodejs-dev hold' | dpkg --set-selections
+apt-get install -f -y
 
 ln -sf /vagrant/site.pp /etc/puppet/manifests/site.pp
 /etc/init.d/puppetmaster restart

@@ -24,6 +24,7 @@ git remote add sileht git@github.com:sileht/puppetlabs-razor.git
 cd /opt/razor/
 git remote add sileht git@github.com:sileht/Razor.git
 git remote add upstream http://github.com/puppetlabs/Razor.git
+git remote add lynxbat https://github.com/lynxbat/Razor.git
 #git fetch sileht
 git fetch upstream
 

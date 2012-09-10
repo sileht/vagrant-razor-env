@@ -9,7 +9,7 @@ EOF
 # puppet module nodejs use ftp.us.debian.org to install the nodejs package
 cat > /etc/apt/sources.list <<EOF
 deb http://192.168.100.1/debian/ wheezy main
-deb http://ftp.us.debian.org/debian/ sid main
+#deb http://ftp.us.debian.org/debian/ sid main
 #deb http://192.168.100.1/security wheezy/updates main
 EOF
 
@@ -23,7 +23,7 @@ apt-get update -y
 # PREFS
 update-alternatives --set editor /usr/bin/vim.basic
 ln -sf /vagrant/.bashrc /root/.bashrc
-echo 'syn on' > /root/.vimrc
+ln -sf /vagrant/.vimrc /root/.vimrc
 
 # Whooo is so quick
 apt-get install -y eatmydata

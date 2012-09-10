@@ -1,6 +1,13 @@
 # vim:set ft=rb:
 
-node /^puppet/ {
+node razor {
+    notify{"super razor":}
+}
+node /^puppet/ inherits razor {
+
+    notify{"super node":}
+}
+node /^puppet2/ {
 
 	dhcp::pool{ 'razor.lan':
 		network => '192.168.100.0',
@@ -60,15 +67,36 @@ node /^puppet/ {
 	  ensure      => present,
 	  description => 'puppet',
 	  plugin      => 'puppet',
-          servers     => [ "$fqdn" ]
+      servers     => [ "$fqdn" ]
 	}
 
+    # a tag to identify my <controller.hostname>
+    rz_tag { "mac_eth1_of_the_controller":
+        tag_label   => "mac_eth1_of_the_controller",
+        tag_matcher => [ { 
+                        'key'     => 'mk_hw_nic1_serial',
+                        'compare' => 'equal',
+                        'value'   => "08:00:27:64:9b:22",
+                    } ],
+    }
+
+    # a tag to identify my <compute?.hostname>
+    rz_tag { "not_mac_eth1_of_the_controller":
+        tag_label   => "not_mac_eth1_of_the_controller",
+        tag_matcher => [ { 
+                        'key'     => 'mk_hw_nic1_serial',
+                        'compare' => 'equal',
+                        'value'   => "08:00:27:64:9b:22",
+                        'invert' => "yes",
+                    } ],
+    }
+    
 	rz_policy { 'controller_policy':
 	  ensure  => present,
 	  broker  => 'puppet_broker',
 	  model   => 'controller_model',
 	  enabled => 'true',
-	  tags    => ['memsize_1511MiB','nics_2'],
+	  tags    => ['mac_eth1_of_the_controller'],
 	  template => 'linux_deploy',
 	  maximum => 1,
 	}
@@ -78,7 +106,7 @@ node /^puppet/ {
 	  broker  => 'puppet_broker',
 	  model   => 'compute_model',
 	  enabled => 'true',
-	  tags    => ['memsize_1015MiB','nics_2'],
+	  tags    => ['not_mac_eth1_of_the_controller'],
 	  template => 'linux_deploy',
 	  maximum => 3,
 	}
@@ -94,12 +122,12 @@ class openstack_network {
               "netmask" => "255.255.255.0",
             },
 
-#            "eth1" => {
-#              "method" => "static",
-#              "address" => $ipaddress_eth1,
-#              "netmask" => "255.255.255.0",
-#              "gateway" => "192.168.100.1"
-#            },
+            "eth1" => {
+              "method" => "static",
+              "address" => $ipaddress_eth1,
+              "netmask" => "255.255.255.0",
+              "gateway" => "192.168.100.1"
+            },
             "eth1" => {
 	      "method" => "dhcp",
             },
@@ -111,31 +139,46 @@ class openstack_network {
 
 ###
 # params needed by compute & controller
+#
+# This example has been designed to be used in the context of http://wiki.debian.org/OpenStackPuppetHowto
+#
+# It can be used to deploy on a single host, by adding the following:
+#
+# node /single.host.com/ inherits controller {}
+#
+# And additional compute and volume hosts can be added by adding the following:
+#
+# node /compute1.host.com/ inherits compute {}
+#
 ###
 
-# The fqdn of the proxy host
+# The public fqdn of the controller host
+$public_server = 'proxy.razor.lan'
+
+# The internal fqdn of the controller host
 $api_server = 'proxy.razor.lan'
 
-# Networking strategy
-$network_manager = 'nova.network.manager.FlatDHCPManager'
-$multi_host_networking = true
-
-# Mysql database root password
+# Mysql database root password. MySQL will be used for nova, keystone and glance. 
 $db_rootpassword = 'dummy_password'
 
 ## Nova
+
+# Networking strategy
+$network_manager = 'nova.network.manager.VlanManager'
+$multi_host_networking = true
 
 # Nova db config
 $db_password = 'dummy_nova_password'
 $db_name = 'nova'
 $db_user = 'nova'
-$db_host = '192.168.100.100' # the private interface !!!
-$db_allowed_hosts = ['192.168.100.%'] # private interfaces !!!
+# TODO: change these two lines to exported variables 
+$db_host = '192.168.100.100' # IP address of the host on which the database will be installed (the controller for instance)
+$db_allowed_hosts = ['192.168.100.%'] # IP addresses for all compute hosts : they need access to the database
 
 # Rabbitmq config
 $rabbit_host = $api_server
 
-# Hypervisor choice
+# Hypervisor
 $libvirt_type = 'qemu'
 
 # nova user declared in keystone
@@ -155,7 +198,7 @@ $keystone_admin_email = 'test@example.com'
 $keystone_admin_pass = 'admin_pass'
 
 # Keystone services tenant (_/!\_ do not change _/!\_)
-$ks_services_tenant = 'services'
+$services_tenant = 'services'
 
 ## Glance
 
@@ -176,33 +219,111 @@ $glance_pass = 'glance_pass'
 ###
 
 # Specify a sane default path for Execs
-Exec {
-  path      => '/usr/bin:/usr/sbin:/bin:/sbin',
-  logoutput => true,
-}
+Exec { path => '/usr/bin:/usr/sbin:/bin:/sbin' }
 
 # Purge variables not explicitly set in this manifest
 resources { 'nova_config':
   purge => true,
 }
 
-###
-# Default node - configuration common to all nodes
-###
 
-node default {
+class role_nova_base {
+  # NOTE(francois.charlier): to be included in Class['nova'] ?
+  nova_config { "my_ip": value => $ipaddress_eth1 }
+
+  class { 'nova':
+    glance_api_servers            => "${glance_host}:9292",
+    image_service                 => 'nova.image.glance.GlanceImageService',
+    rabbit_host                   => $rabbit_host,
+    sql_connection                => "mysql://${db_user}:${db_password}@${db_host}/${db_name}?charset=utf8",
+    verbose                       => true,
+  }
+
+  nova_config { 'multi_host': value   => true }
 }
 
+
+class role_nova_controller {
+  ###
+  # Nova
+  ###
+
+  class { 'nova::rabbitmq':
+  }
+
+  class { 'nova::db::mysql':
+    # pass in db config as params
+    password      => $db_password,
+    dbname        => $db_name,
+    user          => $db_user,
+    host          => 'localhost',
+    allowed_hosts => $db_allowed_hosts,
+    require       => Class['mysql::server'],
+  }
+
+  Class['nova::db::mysql'] -> Class['nova']
+
+  class { "nova::api":
+    enabled           => true,
+    auth_host         => $api_server,
+    admin_tenant_name => $admin_tenant_name,
+    admin_user        => $nova_auth,
+    admin_password    => $nova_pass,
+  }
+
+  class { "nova::objectstore":
+    enabled => true,
+  }
+
+  class { "nova::cert":
+    enabled => true,
+  }
+}
+
+class role_nova_compute {
+  class { 'nova::compute':
+    enabled                       => true,
+    vncserver_proxyclient_address => $ipaddress_eth1,
+    vncproxy_host	          => $public_server,
+  }
+  class { 'nova::compute::libvirt':
+    libvirt_type     => $libvirt_type,
+    vncserver_listen => $ipaddress_eth1,
+  }
+
+  # FIXME: to be included in the nova module ?
+  # NOTE: inspired from http://projects.puppetlabs.com/projects/1/wiki/Kernel_Modules_Patterns
+  # Activate nbd module (for qemu-nbd)
+  exec { "insert_module_nbd":
+    command => "/bin/echo 'nbd' > /etc/modules",
+    unless  => "/bin/grep 'nbd' /etc/modules",
+  }
+  exec { "/sbin/modprobe nbd":
+    unless => "/bin/grep -q '^nbd ' '/proc/modules'"
+  }
+}
 
 ###
 # Controller node
 ###
+node controller {
+  $ipaddress_eth0 = "10.142.6.10"
+  $ipaddress_eth1 = "192.168.100.100"
+  $ipaddress = $ipaddress_eth0
 
-class role_nova_controller_multihost{
-  # We want our servers to be synchronized
-  package { 'ntp':
-    ensure => present,
+  # this break the razor broker because network are down while broker wait for the return of puppet
+  # a better is to setup the network in the razor model but it is not already cutomisable
+  exec{"killall dhclient": onlyif => "pidof dhclient" }
+  class {"openstack_network": }
+
+
+
+  # While http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=668958 is not fixed in Wheezy
+  package { 'lsb-base':
+    ensure => latest,
+    before => Class['mysql::server'],
   }
+
 
   ###
   # Mysql server, required by nova, keystone & glance
@@ -252,55 +373,10 @@ class role_nova_controller_multihost{
   Class['keystone::config::mysql'] -> Class['keystone::roles::admin']
 
   class { 'keystone::endpoint':
-    public_address   => $api_server,
+    public_address   => $public_server,
+    admin_address    => $public_server,
     internal_address => $api_server,
-    admin_address    => $api_server,
   }
-
-  ###
-  # Nova
-  ###
-
-  class { 'nova::rabbitmq':
-  }
-
-  class { 'nova::db::mysql':
-    # pass in db config as params
-    password      => $db_password,
-    dbname        => $db_name,
-    user          => $db_user,
-    host          => 'localhost',
-    allowed_hosts => $db_allowed_hosts,
-    require       => Class['mysql::server'],
-  }
-
-  class { "nova":
-    sql_connection        => "mysql://${db_user}:${db_password}@$localhost/${db_name}?charset=utf8",
-    image_service         => 'nova.image.glance.GlanceImageService',
-    glance_api_servers    => "${glance_host}:9292",
-    rabbit_host           => $rabbit_host,
-    verbose               => $verbose,
-  }
-  Class['nova::db::mysql'] -> Class['nova']
-
-  class { "nova::api":
-    enabled           => true,
-    auth_host         => $api_server,
-    admin_tenant_name => $admin_tenant_name,
-    admin_user        => $nova_auth,
-    admin_password    => $nova_pass,
-  }
-
-  class { "nova::objectstore":
-    enabled => true,
-  }
-
-  class { "nova::cert":
-    enabled => true,
-  }
-
-  # NOTE(fcharlier): to be included in Class['nova'] ?
-  nova_config { "my_ip": value => $ipaddress_eth0 }
 
   class { "nova::scheduler": enabled => true }
 
@@ -309,30 +385,13 @@ class role_nova_controller_multihost{
   class { "nova::consoleauth": enabled => true }
 
   class { "nova::keystone::auth":
-    auth_name        => $nova_auth,
-    password         => $nova_pass,
-    public_address   => $api_server,
-    admin_address    => $api_server,
-    internal_address => $api_server,
+    auth_name => $nova_auth,
+    password  => $nova_pass,
+    public_address   => $public_server,
+    admin_address   => $public_server,
+    internal_address   => $api_server,
   }
   Class['keystone::roles::admin'] -> Class['nova::keystone::auth']
-
-  nova_config { 'multi_host': value => $multi_host_networking }
-
-  class { 'nova::network':
-    private_interface => 'eth1',
-    public_interface  => 'eth0',
-    fixed_range       => '169.254.100.0/24',
-    num_networks      => 1,
-    floating_range    => false,
-    network_manager   => $network_manager,
-    config_overrides  => {
-      flat_interface  => 'eth1',
-    },
-    create_networks   => true,
-    enabled           => false,
-    install_service   => false,
-  }
 
   ###
   # Glance
@@ -341,8 +400,8 @@ class role_nova_controller_multihost{
   class { 'glance::keystone::auth':
     auth_name        => $glance_auth,
     password         => $glance_pass,
-    public_address   => $api_server,
-    admin_address    => $api_server,
+    public_address   => $public_server,
+    admin_address    => $public_server,
     internal_address => $api_server,
   }
   Class['keystone::roles::admin'] -> Class['nova::keystone::auth']
@@ -353,7 +412,7 @@ class role_nova_controller_multihost{
     auth_type         => 'keystone',
     auth_host         => $api_server,
     auth_uri          => "http://${api_server}:5000/v2.0/",
-    keystone_tenant   => $ks_services_tenant,
+    keystone_tenant   => $services_tenant,
     keystone_user     => $glance_auth,
     keystone_password => $glance_pass,
   }
@@ -373,12 +432,38 @@ class role_nova_controller_multihost{
     log_verbose       => 'True',
     log_debug         => 'True',
     auth_type         => 'keystone',
-    keystone_tenant   => $ks_services_tenant,
+    keystone_tenant   => $services_tenant,
     keystone_user     => $glance_auth,
     keystone_password => $glance_pass,
     sql_connection    => "mysql://${glance_db_user}:${glance_db_password}@localhost/${glance_db_name}"
   }
 
+  include role_nova_base
+  include role_nova_controller
+  include role_nova_compute
+
+  class { 'nova::network':
+    private_interface => 'eth1',
+    public_interface  => 'eth0',
+    fixed_range       => '10.145.0.0/16',
+    floating_range    => false,
+    network_manager   => $network_manager,
+    config_overrides  => {
+      vlan_start      => '2000',
+    },
+    create_networks => true,
+    enabled         => true,
+    install_service => true,
+  }
+
+  class { 'memcached':
+    listen_ip => '127.0.0.1',
+  }
+
+  class { 'horizon':
+    secret_key => 'unJidyaf8ow',
+  }
+    
   ###
   # rcfile for tests
   ###
@@ -392,102 +477,38 @@ export OS_AUTH_URL=http://127.0.0.1:5000/v2.0/
 export OS_USERNAME=admin
 export OS_TENANT_NAME=openstack
 "
+
   }
-
-  class { 'memcached':
-    listen_ip => '127.0.0.1',
+  nova_config { 'iscsi_ip_prefix': value => '192.168.' }
+  class { 'nova::volume': }
+  class { 'nova::volume::iscsi':
+    volume_group	=> 'nova-volumes',
+    iscsi_helper	=> 'iscsitarget',
   }
-
-  class { 'horizon':
-    secret_key        => 'mah',
-    cache_server_ip   => '127.0.0.1',
-    cache_server_port => '11211',
-    horizon_app_links => false,
-  }
-
-  file { '/etc/apache2/sites-available/horizon':
-    owner   => 'root',
-    group   => 'root',
-    content => '
-WSGIScriptAlias / /usr/share/openstack-dashboard/openstack_dashboard/wsgi/django.wsgi
-WSGIDaemonProcess openstack-dashboard user=horizon group=horizon
-WSGIProcessGroup openstack-dashboard
-
-<Directory />
-  AllowOverride None
-</Directory>
-
-<Directory /usr/share/openstack-dashboard/openstack_dashboard/wsgi/>
-  Order allow,deny
-  Allow from all
-</Directory>
-
-Alias /static/horizon /usr/share/pyshared/horizon/static/horizon
-
-<Directory /usr/share/pyshared/horizon/static/horizon>
-  Order allow,deny
-  Allow from all
-</Directory>
-
-Alias /static /usr/share/openstack-dashboard/openstack_dashboard/static
-
-<Directory /usr/share/openstack-dashboard/openstack_dashboard/static/>
-  Order allow,deny
-  Allow from all
-</Directory>
-',
-    require => Package['apache2'],
-    notify  => Exec['a2ensite horizon'],
-  }
-
-
-  exec { 'a2ensite horizon':
-    refreshonly => true,
-    notify      => Service['httpd']
-  }
-  exec { 'a2dissite openstack-dashboard':
-    notify  => Service['httpd'],
-  }
-
 }
 
-class role_nova_compute_multihost {
+node compute {
 
-  # We want our cluster to be synchronized
-  package { 'ntp':
-    ensure => present,
+  $nodeid = split($hostname, 'compute')
+  $ipaddress_eth0 = "10.142.6.1$nodeid"
+  $ipaddress_eth1 = "192.168.100.1$nodeid"
+  $ipaddress = $ipaddress_eth0
+  
+  exec{"killall dhclient": onlyif => "pidof dhclient" }
+  class {"openstack_network": }
+
+
+  # Override path globally for all exec resources later
+  Exec { path => '/usr/bin:/usr/sbin/:/bin:/sbin' }
+
+  # While http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=668958 is not fixed in Wheezy
+  package { 'lsb-base':
+    ensure => latest,
+    before => Class['nova'],
   }
 
-  # NOTE(fcharlier): to be included in Class['nova'] ?
-  nova_config { "my_ip": value => $ipaddress_eth0 }
-  nova_config { "routing_source_ip": value => $ipaddress_eth0 }
-
-  class { 'nova':
-    verbose                       => true,
-    sql_connection                => "mysql://${db_user}:${db_password}@${db_host}/${db_name}?charset=utf8",
-    rabbit_host                   => $rabbit_host,
-    image_service                 => 'nova.image.glance.GlanceImageService',
-    glance_api_servers            => "${glance_host}:9292",
-  }
-  class { 'nova::compute':
-    enabled                       => true,
-    vncserver_proxyclient_address => $ipaddress_eth0,
-    vncproxy_host                 => $api_server,
-  }
-  class { 'nova::compute::libvirt':
-    libvirt_type     => $libvirt_type,
-    vncserver_listen => $ipaddress_eth0,
-  }
-
-  include 'keystone::python'
-
-  nova_config {
-    'multi_host'                      : value => $multi_host_networking;
-    'enabled_apis'                    : value => 'metadata';
-    'dhcp_lease_time'                 : value => 600; # set the lease tome to 10 minutes (defaults to 2 minutes)
-    'libvirt_use_virtio_for_bridges'  : value => true; # Virtio networking
-    'resume_guests_state_on_host_boot': value => true;
-  }
+  include role_nova_base
+  include role_nova_compute
 
   class { 'nova::network':
     private_interface => 'eth1',
@@ -496,48 +517,23 @@ class role_nova_compute_multihost {
     floating_range    => false,
     network_manager   => $network_manager,
     config_overrides  => {
-      flat_interface  => 'eth1',
+      vlan_start      => '2000',
     },
     create_networks => false,
     enabled         => true,
     install_service => true,
   }
 
-  # FIXME: to be included in the nova module ?
-  # NOTE: inspired from http://projects.puppetlabs.com/projects/1/wiki/Kernel_Modules_Patterns
-  # Activate nbd module (for qemu-nbd)
-  exec { "insert_module_nbd":
-    command => "/bin/echo 'nbd max-part=64' > /etc/modules",
-    unless  => "/bin/grep 'nbd' /etc/modules",
-  }
-  exec { "/sbin/modprobe nbd max-part=64":
-    unless => "/bin/grep -q '^nbd ' '/proc/modules'"
+  nova_config { 'enabled_apis': value => 'metadata' }
+
+  nova_config { 'iscsi_ip_prefix': value => '192.168.' }
+  class { 'nova::volume': }
+  class { 'nova::volume::iscsi':
+    volume_group	=> 'nova-volumes',
+    iscsi_helper	=> 'iscsitarget',
   }
 }
 
-node /^controller/ {	
-	$ipaddress_eth0 = "10.142.6.10"
-	$ipaddress_eth1 = "192.168.100.100"
-	$ipaddress = $ipaddress_eth0
+node /^controller.*/ inherits controller { }
 
-	# this break the razor broker because network are down while broker wait for the return of puppet
-	# a better is to setup the network in the razor model but it is not already cutomisable
-	exec{"killall dhclient": onlyif => "pidof dhclient" }
-	class {"openstack_network": }
-
-	include role_nova_controller_multihost
-
-}
-
-node /^compute/ {
-
-	$nodeid = split($hostname, 'compute')
-	$ipaddress_eth0 = "10.142.6.1$nodeid"
-	#$ipaddress_eth1 = "192.168.100.1$nodeid"
-	$ipaddress = $ipaddress_eth0
-	
-	#exec{"killall dhclient": onlyif => "pidof dhclient" }
-	class {"openstack_network": }
-
-	include role_nova_compute_multihost
-}
+node /^compute.*/ inherits compute { }

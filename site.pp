@@ -1,28 +1,287 @@
 # vim:set ft=rb:
 
-node razor {
-    notify{"super razor":}
-}
-node /^puppet/ inherits razor {
+$ceph_domain = "ceph.lan"
+$eth0_prefix = "10.0.2"
+$eth1_prefix = "192.168.100"
+$eth1_prefix_reverse = "100.168.192"
+$gateway = "192.168.100.2" # ip du controller
+$password = 'password'
 
-    notify{"super node":}
-}
-node /^puppet2/ {
+$instances_per_server = {
+    "osdhigh" => 12,
+    "osdmed" => 6,
+    "osdlow" => 6,
+    "client" => 6,
+    "mon" => 3,
+    "lb" => 3,
+    "rgw" => 3,
 
-	dhcp::pool{ 'razor.lan':
-		network => '192.168.100.0',
+}
+
+# IP convention:
+# osdhigh-1 : $eth1_prefix.11
+# osdhigh-12 : $eth1_prefix.112
+# osdmed-2 : $eth1_prefix.22
+# osdlow-1 : $eth1_prefix.31
+# client-5 : $eth1_prefix.45
+
+$server_subprefix = {
+    "osdhigh" => 1,
+    "osdmed" => 2,
+    "osdlow" => 3,
+    "client" => 4,
+    "mon" => 5,
+    "lb" => 6,
+    "rgw" => 7,
+}
+
+node /^osd/ inherits ceph_base {
+    class{"ceph": }
+}
+
+node /^mon-/ inherits ceph_base {
+    class{"ceph": }
+}
+
+node /^rgw-/ inherits ceph_base {
+    class{"ceph": rgw => true, }
+}
+
+node /^lb-/ inherits ceph_base {
+}
+
+node /^client-/ inherits ceph_base {
+    package {"rest-bench":}
+    package {"swift":}
+    package {"tsung":}
+
+}
+node /^puppet/ inherits controller_base {
+
+    ceph_system { "mon": 
+        tag_matcher => [
+        { 'key'     => 'macaddress_eth1',
+            'compare' => 'equal',
+            'value'   => '08:00:27:64:9B:11',
+            'inverse' => "false",
+        } ],
+    }
+
+    ceph_system { "osdlow": 
+        tag_matcher => [
+        { 'key'     => 'macaddress_eth1',
+            'compare' => 'equal',
+            'value'   => '08:00:27:64:9B:12',
+            'inverse' => "false",
+        } ],
+    }
+
+    ceph_system { "client": 
+        tag_matcher => [
+        { 'key'     => 'macaddress_eth1',
+            'compare' => 'equal',
+            'value'   => '08:00:27:64:9B:13',
+            'inverse' => "false",
+        } ],
+    }
+
+    ceph_system { "osdmed":
+        tag_matcher  => [
+        { 'key'     => 'macaddress_eth1',
+            'compare' => 'equal',
+            'value'   => '08:00:27:64:9B:23',
+            'inverse' => "false",
+        } ],
+    }
+
+    ceph_system { 'osdhigh':
+        tag_matcher  => [
+        { 'key'     => 'macaddress_eth1',
+            'compare' => 'equal',
+            'value'   => '08:00:27:64:9B:24',
+            'inverse' => "false",
+        } ],
+    }
+
+    ceph_system { 'lb':
+        tag_matcher  => [
+        { 'key'     => 'macaddress_eth1',
+            'compare' => 'equal',
+            'value'   => '08:00:27:64:9B:14',
+            'inverse' => "false",
+        } ],
+    }
+
+    ceph_system { 'rgw':
+        tag_matcher  => [
+        { 'key'     => 'macaddress_eth1',
+            'compare' => 'equal',
+            'value'   => '08:00:27:64:9B:15',
+            'inverse' => "false",
+        } ],
+    }
+
+}
+
+define ceph_system( $tag_matcher = [] ){
+    razor::system { $name:
+        hostprefix => "${name}-",
+        domain => "$ceph_domain",
+        password     => "$password",
+        instances => $instances_per_server[$name],
+        image => 'debian',
+        broker => 'puppet',
+        model_template  => 'debian_wheezy',
+        tag_matcher  => $tag_matcher,
+    }
+}
+
+node base {
+    # Override path globally for all exec resources later
+    Exec { path => '/usr/bin:/usr/sbin/:/bin:/sbin' }
+
+    apt::source { "debian_addons":
+        location          => "http://$gateway:3142/debian/",
+        release           => "wheezy",
+        repos             => "contrib non-free",
+        required_packages => "debian-keyring debian-archive-keyring",
+        key               => "55BE302B",
+        key_server        => "subkeys.pgp.net",
+        pin               => "-10",
+        include_src       => true
+    }
+
+    package {"dstat":}
+    package {"tcpdump":}
+    package {"vim":}
+    package {"screen":}
+    package {"curl":}
+    package {"fio":}
+    package {"bonnie++":}
+    package {"iozone3": 
+        require => Apt::Source["debian_addons"]
+    }
+    package {"dmidecode":}
+
+    package {"pdsh": }
+    package {"xfsprogs": }
+
+    file {"/root/.ssh":
+        ensure => "directory",
+        mode => 644,
+    }
+    file {"/root/.ssh/id_rsa":
+        source => "puppet:///files/id_rsa",
+        mode => "600",
+    }
+    file {"/root/.ssh/id_rsa.pub":
+        source => "puppet:///files/id_rsa.pub",
+        mode => "600",
+    }
+}
+
+node ceph_base inherits base {
+    $nodeid = inline_template("<%= hostname.split('-')[-1] %>") 
+    $nodetype = inline_template("<%= server_subprefix[hostname.split('-')[-2]] %>") 
+
+    # override facter value with new ip address
+    $ipaddress_eth0 = "${eth0_prefix}.${nodetype}${nodeid}"
+    $ipaddress_eth1 = "${eth1_prefix}.${nodetype}${nodeid}"
+    $ipaddress = $ipaddress_eth0
+
+    exec{"killall dhclient": onlyif => "pidof dhclient" }
+
+    class { "network::interfaces":
+        interfaces => {
+            "eth0" => {
+                "method" => "static",
+                "address" => $ipaddress_eth0,
+                "netmask" => "255.255.255.0",
+            },
+
+            "eth1" => {
+                "method" => "static",
+                "address" => $ipaddress_eth1,
+                "netmask" => "255.255.255.0",
+                "gateway" => "192.168.100.1"
+            },
+        },
+        auto => ["eth0", "eth1"],
+    }
+
+    file {"/root/.ssh/authorized_keys":
+        source => "puppet:///files/authorized_keys",
+        mode => 644,
+    }
+
+}
+
+
+node controller_base inherits base {
+    package {"apt-cacher-ng": }
+    service {"apt-cacher-ng": require => Package["apt-cacher-ng"] }
+    package {"dnsmasq": }
+    service {"dnsmasq": require => Package["dnsmasq"] }
+
+    file {"/etc/hosts":
+        content => inline_template('
+127.0.0.1   localhost
+<%= ipaddress_eth1 %> <%= fqdn %> <%= hostname %> puppet.<%= domain %> puppet
+
+<% instances_per_server.each do |name, nb| (Range.new(1,nb.to_i)).each do |i| -%>
+<%= eth1_prefix %>.<%= server_subprefix[name] %><%= i %> <%= name %>-adm-<%= i %>.<%= ceph_domain %> <%= name %>-adm-<%= i %>
+<% end end -%>
+
+<% instances_per_server.each do |name, nb| (Range.new(1,nb.to_i)).each do |i| -%>
+<%= eth0_prefix %>.<%= server_subprefix[name] %><%= i %> <%= name %>-<%= i %>.<%= ceph_domain %> <%= name %>-<%= i %>
+<% end end -%>
+'),
+        notify => Service["dnsmasq"],
+        require => Package["dnsmasq"],
+    }
+    
+    file {"/root/.ssh/config":
+        content => "
+Host *
+    UserKnownHostsFile=/dev/null
+    StrictHostKeyChecking=no
+"
+    }
+
+    exec { "set_masq":
+        command => "/sbin/iptables -t nat -A POSTROUTING -s ${eth1_prefix}.0/24 ! -d ${eth1_prefix}.0/24 -j MASQUERADE",
+        refreshonly => true,
+        subscribe => File["/etc/rc.local"],
+    }
+    exec { "set_forward":
+        command => "/bin/echo 1 > /proc/sys/net/ipv4/ip_forward",
+        refreshonly => true,
+        subscribe => File["/etc/rc.local"],
+    }
+
+    file { "/etc/rc.local":
+        content => "
+#!/bin/sh
+echo 1 > /proc/sys/net/ipv4/ip_forward
+/sbin/iptabless -t nat -A POSTROUTING -s ${eth1_prefix}.0/24 ! -d ${eth1_prefix}.0/24 -j MASQUERADE'
+exit 0
+"
+    }
+
+	dhcp::pool{ $ceph_domain:
+		network => "${eth1_prefix}.0",
 		mask    => '255.255.255.0',
-		range   => '192.168.100.150 192.168.100.200',
-		gateway => '192.168.100.1',
+		range   => "${eth1_prefix}.200 ${eth1_prefix}.250",
+		gateway => "$ipaddress_eth1",
 	}
 	class { 'dhcp':
 		dnsdomain   => [
-			'razor.lan',
-			'100.168.192.in-addr.arpa',
-			],
+			"$ceph_domain",
+			"${eth1_prefix_reverse}.in-addr.arpa",
+		],
 		nameservers => [$ipaddress_eth1],
 		interfaces  => ['eth1'],
-		ntpservers  => ['us.pool.ntp.org'],
+		ntpservers  => [$ipaddress_eth1,],
 		pxeserver   => $ipaddress_eth1,
 		pxefilename => 'pxelinux.0',
 	}
@@ -32,508 +291,117 @@ node /^puppet2/ {
 	}    
 	class { 'razor': 
 		address => $ipaddress_eth1,
-		mk_name => "rz_mk_prod-image.0.9.0.5.iso",
-		mk_source => "/vagrant/rz_mk_prod-image.0.9.0.5.iso",
-  		server_opts_hash => { 'mk_log_level' => 'Logger::DEBUG' },
+        mk_name => 'rz_mk_dev-image.0.9.1.6.iso',
+        mk_source => 'https://github.com/downloads/puppetlabs/Razor-Microkernel/rz_mk_dev-image.0.9.1.6.iso',
+#  		server_opts_hash => { 'mk_log_level' => 'Logger::DEBUG' },
 		git_source => "https://github.com/sileht/Razor.git",
-		git_revision => "master",
-	}
+		git_revision => "poc",
+    }
 
-	rz_image { "debian-wheezy-netboot-amd64.iso":
+	rz_image { "debian":
 		ensure  => present,
 		type    => 'os',
 		version => '7.0b1',
-#		source  => "http://ftp.debian.org/debian/dists/wheezy/main/installer-amd64/current/images/netboot/mini.iso",
 		source  => "/vagrant/mini.iso",
 	}
 
-	rz_model { 'controller_model':
-	  ensure      => present,
-	  description => 'Controller Wheezy Model',
-	  image       => 'debian-wheezy-netboot-amd64.iso',
-	  metadata    => {'domainname' => 'razor.lan', 'hostname_prefix' => 'controller', 'root_password' => 'password'},
-	  template    => 'debian_wheezy',
+	rz_broker { 'puppet':
+	    ensure      => present,
+	    plugin      => 'puppet',
+        servers     => [ "$fqdn" ]
 	}
-
-	rz_model { 'compute_model':
-	  ensure      => present,
-	  description => 'Compute Wheezy Model',
-	  image       => 'debian-wheezy-netboot-amd64.iso',
-	  metadata    => {'domainname' => 'razor.lan', 'hostname_prefix' => 'compute', 'root_password' => 'password'},
-	  template    => 'debian_wheezy',
-	}
-	
-	rz_broker { 'puppet_broker':
-	  ensure      => present,
-	  description => 'puppet',
-	  plugin      => 'puppet',
-      servers     => [ "$fqdn" ]
-	}
-
-    # a tag to identify my <controller.hostname>
-    rz_tag { "mac_eth1_of_the_controller":
-        tag_label   => "mac_eth1_of_the_controller",
-        tag_matcher => [ { 
-                        'key'     => 'mk_hw_nic1_serial',
-                        'compare' => 'equal',
-                        'value'   => "08:00:27:64:9b:22",
-                    } ],
-    }
-
-    # a tag to identify my <compute?.hostname>
-    rz_tag { "not_mac_eth1_of_the_controller":
-        tag_label   => "not_mac_eth1_of_the_controller",
-        tag_matcher => [ { 
-                        'key'     => 'mk_hw_nic1_serial',
-                        'compare' => 'equal',
-                        'value'   => "08:00:27:64:9b:22",
-                        'invert' => "yes",
-                    } ],
-    }
-    
-	rz_policy { 'controller_policy':
-	  ensure  => present,
-	  broker  => 'puppet_broker',
-	  model   => 'controller_model',
-	  enabled => 'true',
-	  tags    => ['mac_eth1_of_the_controller'],
-	  template => 'linux_deploy',
-	  maximum => 1,
-	}
-
-	rz_policy { 'compute_policy':
-	  ensure  => present,
-	  broker  => 'puppet_broker',
-	  model   => 'compute_model',
-	  enabled => 'true',
-	  tags    => ['not_mac_eth1_of_the_controller'],
-	  template => 'linux_deploy',
-	  maximum => 3,
-	}
-
 }
 
-class openstack_network {
-        class { "network::interfaces":
-          interfaces => {
-            "eth0" => {
-              "method" => "static",
-              "address" => $ipaddress_eth0,
-              "netmask" => "255.255.255.0",
-            },
+class ceph(
+    $radosgw = false,
+){
 
-            "eth1" => {
-              "method" => "static",
-              "address" => $ipaddress_eth1,
-              "netmask" => "255.255.255.0",
-              "gateway" => "192.168.100.1"
-            },
-            "eth1" => {
-	      "method" => "dhcp",
-            },
-          },
-          auto => ["eth0", "eth1"],
+    # common part
+    apt::source{'ceph-repo':
+        location => 'http://ceph.com/debian/',
+        key => "17ED316D",
+        key_source => "https://raw.github.com/ceph/ceph/master/keys/release.asc"
+    }
+
+    package {"ceph-common": ensure => latest, require => Apt::Source["ceph-repo"] }
+    package {"ceph": ensure => latest, require => Apt::Source["ceph-repo"] }
+    package {"librbd1": ensure => latest, require => Apt::Source["ceph-repo"] }
+    package {"librados2": ensure => latest, require => Apt::Source["ceph-repo"] }
+    package {"libcephfs1": ensure => latest, require => Apt::Source["ceph-repo"] }
+
+    if $radosgw {
+
+        package {"radosgw": ensure => latest, require => Apt::Source["ceph-repo"] }
+        package {"apache2": }
+        package {"libapache2-mod-fastcgi": 
+            require => Package["apache2"],
+            notify => Service["apache2"],
         }
+
+        exec { '/usr/sbin/a2dissite default': 
+            require => Package["apache2"],
+        }
+        file { '/etc/apache2/sites-available/radosgw':
+            content => '
+<VirtualHost *:80>
+        ServerName ceph1.fqdn.tld
+        ServerAdmin root@ceph1
+        DocumentRoot /var/www
+
+        # rewrting rules only need for amazon s3
+        RewriteEngine On
+        RewriteRule ^/([a-zA-Z0-9-_.]*)([/]?.*) /s3gw.fcgi?page=$1&params=$2&%{QUERY_STRING} [E=HTTP_AUTHORIZATION:%{HTTP:Authorization},L]
+
+        FastCgiExternalServer /var/www/s3gw.fcgi -socket /tmp/radosgw.sock
+        <IfModule mod_fastcgi.c>
+                <Directory /var/www>
+                        Options +ExecCGI
+                        AllowOverride All
+                        SetHandler fastcgi-script
+                        Order allow,deny
+                        Allow from all
+                        AuthBasicAuthoritative Off
+                </Directory>
+        </IfModule>
+
+        AllowEncodedSlashes On
+        ErrorLog /var/log/apache2/error.log
+        CustomLog /var/log/apache2/access.log combined
+        ServerSignature Off
+</VirtualHost>
+            '
+        }
+        file { '/var/www/s3gw.fcgi':
+            content => '
+exec /usr/bin/radosgw -c /etc/ceph/ceph.conf -n client.radosgw.gateway
+',
+            mode => 755,
+        }
+
+        exec {'/usr/sbin/a2enmod rewrite fastcgi':
+            require => [
+                Package["apache2"],
+                Package["libapache2-mod-fastcgi"],
+            ],
+            notify => Service["apache2"],
+        }
+
+        exec {'/usr/sbin/a2ensite radosgw': 
+            require => [
+                Package["apache2"],
+                Package["libapache2-mod-fastcgi"],
+                File["/etc/apache2/sites-available/radosgw"],
+            ],
+            notify => Service["apache2"],
+        }
+        service{"apache2": 
+            hasrestart => true,
+        }
+    } else {
+        package {"radosgw": ensure => absent }
+        package {"apache2": ensure => absent }
+        package {"libapache2-mod-fastcgi": ensure => absent } 
+    } 
 }
 
 
-###
-# params needed by compute & controller
-#
-# This example has been designed to be used in the context of http://wiki.debian.org/OpenStackPuppetHowto
-#
-# It can be used to deploy on a single host, by adding the following:
-#
-# node /single.host.com/ inherits controller {}
-#
-# And additional compute and volume hosts can be added by adding the following:
-#
-# node /compute1.host.com/ inherits compute {}
-#
-###
-
-# The public fqdn of the controller host
-$public_server = 'proxy.razor.lan'
-
-# The internal fqdn of the controller host
-$api_server = 'proxy.razor.lan'
-
-# Mysql database root password. MySQL will be used for nova, keystone and glance. 
-$db_rootpassword = 'dummy_password'
-
-## Nova
-
-# Networking strategy
-$network_manager = 'nova.network.manager.VlanManager'
-$multi_host_networking = true
-
-# Nova db config
-$db_password = 'dummy_nova_password'
-$db_name = 'nova'
-$db_user = 'nova'
-# TODO: change these two lines to exported variables 
-$db_host = '192.168.100.100' # IP address of the host on which the database will be installed (the controller for instance)
-$db_allowed_hosts = ['192.168.100.%'] # IP addresses for all compute hosts : they need access to the database
-
-# Rabbitmq config
-$rabbit_host = $api_server
-
-# Hypervisor
-$libvirt_type = 'qemu'
-
-# nova user declared in keystone
-$nova_auth = 'nova'
-$nova_pass = 'nova_pass'
-
-## Keystone
-
-# Keystone db config
-$keystone_db_password = 'dummy_keystone_password'
-$keystone_db_name = 'keystone'
-$keystone_db_user = 'keystone'
-
-# Keystone admin credendials
-$keystone_admin_token = 'admin_token'
-$keystone_admin_email = 'test@example.com'
-$keystone_admin_pass = 'admin_pass'
-
-# Keystone services tenant (_/!\_ do not change _/!\_)
-$services_tenant = 'services'
-
-## Glance
-
-# Glance host
-$glance_host = $api_server
-
-# Glance db config
-$glance_db_password = 'dummy_glance_password'
-$glance_db_name = 'glance'
-$glance_db_user = 'glance'
-
-# glance user declared in keystone
-$glance_auth = 'glance'
-$glance_pass = 'glance_pass'
-
-###
-# Overrides
-###
-
-# Specify a sane default path for Execs
-Exec { path => '/usr/bin:/usr/sbin:/bin:/sbin' }
-
-# Purge variables not explicitly set in this manifest
-resources { 'nova_config':
-  purge => true,
-}
-
-
-class role_nova_base {
-  # NOTE(francois.charlier): to be included in Class['nova'] ?
-  nova_config { "my_ip": value => $ipaddress_eth1 }
-
-  class { 'nova':
-    glance_api_servers            => "${glance_host}:9292",
-    image_service                 => 'nova.image.glance.GlanceImageService',
-    rabbit_host                   => $rabbit_host,
-    sql_connection                => "mysql://${db_user}:${db_password}@${db_host}/${db_name}?charset=utf8",
-    verbose                       => true,
-  }
-
-  nova_config { 'multi_host': value   => true }
-}
-
-
-class role_nova_controller {
-  ###
-  # Nova
-  ###
-
-  class { 'nova::rabbitmq':
-  }
-
-  class { 'nova::db::mysql':
-    # pass in db config as params
-    password      => $db_password,
-    dbname        => $db_name,
-    user          => $db_user,
-    host          => 'localhost',
-    allowed_hosts => $db_allowed_hosts,
-    require       => Class['mysql::server'],
-  }
-
-  Class['nova::db::mysql'] -> Class['nova']
-
-  class { "nova::api":
-    enabled           => true,
-    auth_host         => $api_server,
-    admin_tenant_name => $admin_tenant_name,
-    admin_user        => $nova_auth,
-    admin_password    => $nova_pass,
-  }
-
-  class { "nova::objectstore":
-    enabled => true,
-  }
-
-  class { "nova::cert":
-    enabled => true,
-  }
-}
-
-class role_nova_compute {
-  class { 'nova::compute':
-    enabled                       => true,
-    vncserver_proxyclient_address => $ipaddress_eth1,
-    vncproxy_host	          => $public_server,
-  }
-  class { 'nova::compute::libvirt':
-    libvirt_type     => $libvirt_type,
-    vncserver_listen => $ipaddress_eth1,
-  }
-
-  # FIXME: to be included in the nova module ?
-  # NOTE: inspired from http://projects.puppetlabs.com/projects/1/wiki/Kernel_Modules_Patterns
-  # Activate nbd module (for qemu-nbd)
-  exec { "insert_module_nbd":
-    command => "/bin/echo 'nbd' > /etc/modules",
-    unless  => "/bin/grep 'nbd' /etc/modules",
-  }
-  exec { "/sbin/modprobe nbd":
-    unless => "/bin/grep -q '^nbd ' '/proc/modules'"
-  }
-}
-
-###
-# Controller node
-###
-node controller {
-  $ipaddress_eth0 = "10.142.6.10"
-  $ipaddress_eth1 = "192.168.100.100"
-  $ipaddress = $ipaddress_eth0
-
-  # this break the razor broker because network are down while broker wait for the return of puppet
-  # a better is to setup the network in the razor model but it is not already cutomisable
-  exec{"killall dhclient": onlyif => "pidof dhclient" }
-  class {"openstack_network": }
-
-
-
-  # While http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=668958 is not fixed in Wheezy
-  package { 'lsb-base':
-    ensure => latest,
-    before => Class['mysql::server'],
-  }
-
-
-  ###
-  # Mysql server, required by nova, keystone & glance
-  ###
-  class { 'mysql::server':
-    config_hash => {
-      # eth1 is our private network interface
-      bind_address  => $ipaddress_eth1,
-      root_password => $db_rootpassword,
-    }
-  }
-
-  ###
-  # Keystone
-  ###
-
-  class { 'keystone::db::mysql':
-    password => $keystone_db_password,
-    dbname   => $keystone_db_name,
-    user     => $keystone_db_user,
-    host     => 'localhost',
-    require  => Class['mysql::server'],
-  }
-
-  class { 'keystone':
-    admin_token  => $keystone_admin_token,
-    log_verbose  => true,
-    log_debug    => true,
-    compute_port => 8774,
-    catalog_type => 'sql'
-  }
-
-  class { 'keystone::config::mysql':
-    user     => $keystone_db_user,
-    password => $keystone_db_password,
-    host     => 'localhost',
-    dbname   => $keystone_db_name,
-  }
-  Class['keystone::db::mysql'] -> Class['keystone::config::mysql']
-
-  # Creates an 'admin' keystone user in tenant named 'openstack'
-  class { 'keystone::roles::admin':
-    email    => $keystone_admin_email,
-    password => $keystone_admin_pass,
-  }
-  Class['keystone'] -> Class['keystone::roles::admin']
-  Class['keystone::config::mysql'] -> Class['keystone::roles::admin']
-
-  class { 'keystone::endpoint':
-    public_address   => $public_server,
-    admin_address    => $public_server,
-    internal_address => $api_server,
-  }
-
-  class { "nova::scheduler": enabled => true }
-
-  class { "nova::vncproxy": enabled => true }
-
-  class { "nova::consoleauth": enabled => true }
-
-  class { "nova::keystone::auth":
-    auth_name => $nova_auth,
-    password  => $nova_pass,
-    public_address   => $public_server,
-    admin_address   => $public_server,
-    internal_address   => $api_server,
-  }
-  Class['keystone::roles::admin'] -> Class['nova::keystone::auth']
-
-  ###
-  # Glance
-  ###
-
-  class { 'glance::keystone::auth':
-    auth_name        => $glance_auth,
-    password         => $glance_pass,
-    public_address   => $public_server,
-    admin_address    => $public_server,
-    internal_address => $api_server,
-  }
-  Class['keystone::roles::admin'] -> Class['nova::keystone::auth']
-
-  class { 'glance::api':
-    log_verbose       => 'True',
-    log_debug         => 'True',
-    auth_type         => 'keystone',
-    auth_host         => $api_server,
-    auth_uri          => "http://${api_server}:5000/v2.0/",
-    keystone_tenant   => $services_tenant,
-    keystone_user     => $glance_auth,
-    keystone_password => $glance_pass,
-  }
-
-  class { 'glance::backend::file':
-  }
-
-  class { 'glance::db::mysql':
-    password       => $glance_db_password,
-    dbname         => $glance_db_name,
-    user           => $glance_db_user,
-    host           => 'localhost',
-    require        => Class['mysql::server'],
-  }
-
-  class { 'glance::registry':
-    log_verbose       => 'True',
-    log_debug         => 'True',
-    auth_type         => 'keystone',
-    keystone_tenant   => $services_tenant,
-    keystone_user     => $glance_auth,
-    keystone_password => $glance_pass,
-    sql_connection    => "mysql://${glance_db_user}:${glance_db_password}@localhost/${glance_db_name}"
-  }
-
-  include role_nova_base
-  include role_nova_controller
-  include role_nova_compute
-
-  class { 'nova::network':
-    private_interface => 'eth1',
-    public_interface  => 'eth0',
-    fixed_range       => '10.145.0.0/16',
-    floating_range    => false,
-    network_manager   => $network_manager,
-    config_overrides  => {
-      vlan_start      => '2000',
-    },
-    create_networks => true,
-    enabled         => true,
-    install_service => true,
-  }
-
-  class { 'memcached':
-    listen_ip => '127.0.0.1',
-  }
-
-  class { 'horizon':
-    secret_key => 'unJidyaf8ow',
-  }
-    
-  ###
-  # rcfile for tests
-  ###
-  file { '/root/openrc.sh':
-    ensure  => present,
-    group   => 0,
-    owner   => 0,
-    mode    => '0600',
-    content => "export OS_PASSWORD=${keystone_admin_pass}
-export OS_AUTH_URL=http://127.0.0.1:5000/v2.0/
-export OS_USERNAME=admin
-export OS_TENANT_NAME=openstack
-"
-
-  }
-  nova_config { 'iscsi_ip_prefix': value => '192.168.' }
-  class { 'nova::volume': }
-  class { 'nova::volume::iscsi':
-    volume_group	=> 'nova-volumes',
-    iscsi_helper	=> 'iscsitarget',
-  }
-}
-
-node compute {
-
-  $nodeid = split($hostname, 'compute')
-  $ipaddress_eth0 = "10.142.6.1$nodeid"
-  $ipaddress_eth1 = "192.168.100.1$nodeid"
-  $ipaddress = $ipaddress_eth0
-  
-  exec{"killall dhclient": onlyif => "pidof dhclient" }
-  class {"openstack_network": }
-
-
-  # Override path globally for all exec resources later
-  Exec { path => '/usr/bin:/usr/sbin/:/bin:/sbin' }
-
-  # While http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=668958 is not fixed in Wheezy
-  package { 'lsb-base':
-    ensure => latest,
-    before => Class['nova'],
-  }
-
-  include role_nova_base
-  include role_nova_compute
-
-  class { 'nova::network':
-    private_interface => 'eth1',
-    public_interface  => 'eth0',
-    fixed_range       => '192.168.100.0/24',
-    floating_range    => false,
-    network_manager   => $network_manager,
-    config_overrides  => {
-      vlan_start      => '2000',
-    },
-    create_networks => false,
-    enabled         => true,
-    install_service => true,
-  }
-
-  nova_config { 'enabled_apis': value => 'metadata' }
-
-  nova_config { 'iscsi_ip_prefix': value => '192.168.' }
-  class { 'nova::volume': }
-  class { 'nova::volume::iscsi':
-    volume_group	=> 'nova-volumes',
-    iscsi_helper	=> 'iscsitarget',
-  }
-}
-
-node /^controller.*/ inherits controller { }
-
-node /^compute.*/ inherits compute { }

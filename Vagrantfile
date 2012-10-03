@@ -34,6 +34,16 @@ Vagrant::Config.run do |env_config|
         config.vm.boot_mode = :gui
     end
 
+    env_config.vm.define "osd2" do |config|
+        config.vm.box = "pxe"
+        config.vm.network :hostonly, "192.168.100.18", :adapter => 1, :mac => "080027649A18"
+        config.vm.network :hostonly, "192.168.100.68", :adapter => 2, :mac => "080027649B18"
+        config.vm.customize ["modifyvm", :id, "--memory", 1024]
+        config.ssh.port = 22
+        config.ssh.max_tries = 0
+        config.vm.boot_mode = :gui
+    end
+
     env_config.vm.define "client1" do |config|
         config.vm.box = "pxe"
         config.vm.network :hostonly, "192.168.100.22", :adapter => 1, :mac => "080027649A13"

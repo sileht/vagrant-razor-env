@@ -3,27 +3,63 @@
 RUN=$1
 
 set -e 
+############
+# REAL ENV #
+############
 
-#PRIVATE_CIDR="169.254.6.0/24"
-#PUBLIC_CIDR="10.142.6.0/24"
+PRIVATE_CIDR="10.241.0.0/24"
+PUBLIC_CIDR="10.241.0.0/24"
 
-#PRIVATE_CIDR="10.0.2.0/24"
+MON_SERVERS="mon-1 mon-2 mon-3"
+RGW_SERVERS="rgw-1 rgw-2 rgw-3"
+
+OSDLOW_SERVERS="osdlow-1 osdlow-2 osdlow-3"
+OSDMED_SERVERS="osdmed-1 osdmed-2 osdmed-3 osdmed-4 osdmed-5 osdmed-6"
+OSDHIGH_SERVERS="osdhigh-1 osdhigh-2 osdhigh-3 osdhigh-4 osdhigh-5 osdhigh-6 osdhigh-7 osdhigh-8 osdhigh-9 osdhigh-10 osdhigh-11 osdhigh-12"
+
+OSD_ALL_SERVERS="$OSDLOW_SERVERS $OSDMED_SERVERS $OSDHIGH_SERVERS"
+
+case $RUN 
+    low)
+NB_OSD_PER_SERVER=$((12*3)) # LOW 3T
+OSD_SERVERS=$OSDLOW_SERVERS
+    ;;
+    med)
+NB_OSD_PER_SERVER=$((12*3)) # MED 3T
+OSD_SERVERS=$OSDMED_SERVERS
+    ;;
+    high)
+NB_OSD_PER_SERVER=$((24 + 12)) # HIGH
+OSD_SERVERS=$OSDHIGH_SERVERS
+    ;;
+    vagrant)
+
+
+###############
+# VAGRANT ENV #
+###############
+
 PRIVATE_CIDR="192.168.100.0/24"
 PUBLIC_CIDR="192.168.100.0/24"
+MON_SERVERS="ceph2 ceph3 ceph4"
+RADOSGW_SERVERS="ceph5"
+OSD_SERVERS="ceph2 ceph3 ceph4"
+OSD_ALL_SERVERS="ceph2 ceph3 ceph4"
+NB_OSD_PER_SERVER=5
+
+    *)
+    echo "usage: $(basename $1) [low|med|high|vagrant]"
+    exit 1
+    ;;
+esac
+
+###############
 
 PRIVATE_NET=${PRIVATE_CIDR%.*}
 PUBLIC_NET=${PUBLIC_CIDR%.*}
 PRIVATE_NET_LEN=${PRIVATE_CIDR#*/}
 PUBLIC_NET_LEN=${PUBLIC_CIDR#*/}
-
-MON_SERVERS="ceph2 ceph3 ceph4"
-OSD_SERVERS="ceph2 ceph3 ceph4"
-OSD_ALL_SERVERS="ceph2 ceph3 ceph4 ceph6 ceph7 ceph8"
-RADOSGW_SERVERS="ceph5"
-
-NB_OSD_SERVERS=1
-#NB_OSD_SERVERS=$(get_osd_nodes | wc -w)
-NB_OSD_PER_SERVER=5
+NB_OSD_SERVERS=$(echo $OSD_SERVERS | wc -w)
 
 chr() {
     [ ${1} -lt 256 ] || return 1

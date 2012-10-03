@@ -26,10 +26,3 @@ index 3f8af5a..573513f 100644
      install_puppet
      configure_puppet
      <%= 'facts_dot_d' if @options[:metadata] %>
-@@ -62,4 +70,5 @@ function provision_puppet() {
-     exit 0
- }
- 
--provision_puppet 2>&1 | tee /tmp/puppet.log
-+provision_puppet
-+

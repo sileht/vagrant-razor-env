@@ -1,0 +1,47 @@
+diff --git a/lib/project_razor/broker/puppet/agent_install.erb b/lib/project_razor/broker/puppet/agent_install.erb
+index a740618..20dae3c 100644
+--- a/lib/project_razor/broker/puppet/agent_install.erb
++++ b/lib/project_razor/broker/puppet/agent_install.erb
+@@ -5,7 +5,8 @@ set -e
+ 
+ function install_puppet() {
+     # TODO add support for versions
+-    gem install puppet --no-ri --no-rdoc
++    #gem install puppet --no-ri --no-rdoc
++    apt-get install -y --force-yes puppet
+ }
+ 
+ function configure_puppet() {
+@@ -18,11 +19,19 @@ vardir = /var/lib/puppet
+ ssldir = /var/lib/puppet/ssl
+ pluginsync = true
+ report = true
++listen = true
+ ca_server = <%= @options[:ca_server] %>
+ server = <%= @options[:server] %>
+ certname = <%= @options[:puppetagent_certname] %>
+ EOFPUPPETCONF
+ 
++cat > /etc/puppet/auth.conf <<EOF
++path    /run
++method  save
++auth    any
++allow   <%= @options[:server] %>
++EOF
++
+     if [ -f /etc/default/puppet ]; then
+         cat > /etc/default/puppet <<EOFPUPPETDEFAULT
+ # Defaults for puppet - sourced by /etc/init.d/puppet
+@@ -37,8 +46,10 @@ EOFPUPPETDEFAULT
+ }
+ 
+ function start_puppet() {
+-    puppet agent -t
+-    /usr/bin/nohup puppet agent &
++#    puppet agent -t
++    puppet agent -t --noop
++    #/usr/bin/nohup puppet agent &
++    /etc/init.d/puppet start
+ }
+ 
+ #This fuction is not called if no custom facts are given

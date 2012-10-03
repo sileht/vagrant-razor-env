@@ -1,0 +1,193 @@
+From 9b876ae1bf10b9a0a098f875f957c06109597ba9 Mon Sep 17 00:00:00 2001
+From: Mehdi Abaakouk <sileht@sileht.net>
+Date: Tue, 28 Aug 2012 12:12:04 +0200
+Subject: [PATCH] Allow configuration file with not all fields
+
+The configuration is now always converted in a Hash
+The Hash is cleaned to contains only valid key/value
+And the hash is finally merged with the default config object
+---
+ lib/project_razor/data.rb   |   76 ++++++++++++++++++-------------------------
+ spec/common/rz_data_spec.rb |   39 ++++++++++++++++++----
+ 2 files changed, 64 insertions(+), 51 deletions(-)
+
+diff --git a/lib/project_razor/data.rb b/lib/project_razor/data.rb
+index 8e1d58d..4e89a0c 100644
+--- a/lib/project_razor/data.rb
++++ b/lib/project_razor/data.rb
+@@ -194,71 +194,57 @@ def setup_persist
+     #
+     # @return [ProjectRazor::Config::Server, ProjectRazor]
+     def load_config
+-      logger.debug "Loading config at (#{$config_server_path}"
+-      loaded_config = nil
++      logger.debug "Loading config at (#{$config_server_path})"
++
++      @razor_config = ProjectRazor::Config::Server.new
++
++      loaded_config = {}
+       if File.exist?($config_server_path)
+         begin
+           conf_file = File.open($config_server_path)
+           #noinspection RubyResolve,RubyResolve
+           loaded_config = YAML.load(conf_file)
+-            # We catch the basic root errors
++          # We catch the basic root errors
+         rescue SyntaxError
+           logger.warn "SyntaxError loading (#{$config_server_path})"
+-          loaded_config = nil
++          loaded_config = {}
+         rescue StandardError
+           logger.warn "Generic error loading (#{$config_server_path})"
+-          loaded_config = nil
++          loaded_config = {}
+         ensure
+           conf_file.close
+         end
+-      end
+ 
+-      # If our object didn't load we run our config reset
+-      if loaded_config.is_a?(ProjectRazor::Config::Server)
+-        if loaded_config.validate_instance_vars
+-          @razor_config = loaded_config
+-        else
+-          logger.warn "Config parameter validation error loading (#{$config_server_path})"
+-          logger.warn "Resetting (#{$config_server_path}) and loading default config"
+-          reset_config
++        # convert to Hash old format or object dump
++        if loaded_config.is_a?(ProjectRazor::Config::Server)
++          logger.debug "Convert config object to hash"
++          loaded_config = loaded_config.to_hash
++        end 
++
++        if not loaded_config.is_a?(Hash)
++          logger.warn "Format error loading (#{$config_server_path}): #{loaded_config.class}"
++          return
+         end
+-      else
+-        logger.warn "Cannot load (#{$config_server_path})"
++      end
+ 
+-        reset_config
++      if loaded_config.nil?
++          logger.warn "loaded config empty (#{$config_server_path}): #{loaded_config}"
++          return
+       end
+-    end
+ 
+-    # Creates new 'razor_server.conf' if one does not already exist
+-    # @api private
+-    #
+-    # @return [ProjectRazor::Config::Server, ProjectRazor]
+-    def reset_config
+-      logger.warn "Resetting (#{$config_server_path}) and loading default config"
+-      # use default init
+-      new_conf = ProjectRazor::Config::Server.new
++      # Ensure each key start with a @
++      loaded_config = Hash[loaded_config.map {|k, v| ["@#{k.sub(/^@/,'')}", v]}]
+ 
+-      # Very important that we only write the file if it doesn't exist as we may not be the only thread using it
+-      unless File.exist?($config_server_path)
+-        begin
+-          new_conf_file = File.new($config_server_path, 'w+')
+-          new_conf_file.write(("#{new_conf_header}#{YAML.dump(new_conf)}"))
+-          new_conf_file.close
+-          logger.info "Default config saved to (#{$config_server_path})"
+-        rescue
+-          logger.error "Cannot save default config to (#{$config_server_path})"
+-        end
++      # Remove incorrect key/value
++      clean_loaded_config = Hash[loaded_config.select {|k, v| not v.nil? or @razor_config.instance_variables.include?(k) }]
++
++      # Warn the user
++      (clean_loaded_config.keys - loaded_config.keys).each do |key|
++        logger.warn "#{key} is invalid, it will be ignored (see razor config to see existing fields)"
+       end
+-      @razor_config = new_conf
+-    end
+ 
+-    # Returns a header for new 'razor_server.conf' files
+-    # @api private
+-    #
+-    # @return [ProjectRazor::Config::Server, ProjectRazor]
+-    def new_conf_header
+-      "\n# This file is the main configuration for ProjectRazor\n#\n# -- this was system generated --\n#\n#\n"
++      # merge default config and loaded config
++      @razor_config.from_hash(clean_loaded_config)
+     end
+-
+   end
+ end
+diff --git a/spec/common/rz_data_spec.rb b/spec/common/rz_data_spec.rb
+index d7ca47f..d9723d2 100644
+--- a/spec/common/rz_data_spec.rb
++++ b/spec/common/rz_data_spec.rb
+@@ -34,13 +34,39 @@ def write_config(config)
+       if File.exists?("#{$config_server_path}.backup")
+         File.delete($config_server_path)
+         FileUtils.mv("#{$config_server_path}.backup", $config_server_path, :force => true) if File.exists?("#{$config_server_path}.backup")
+-      else
+-        write_config(default_config)
+       end
+ 
+     end
+ 
+-    it "should load a config from config path(#{$config_server_path}) on init" do
++    it "should load a config (Hash) from config path(#{$config_server_path}) on init" do
++      config = {
++        "persist_host" => "127.0.0.1",
++        "persist_mode" => :mongo,
++        "persist_port" => 27017,
++        "admin_port" => (rand(1000)+1).to_s,
++        "api_port" => (rand(1000)+1).to_s,
++        "persist_timeout" => PC_TIMEOUT,
++      }
++      write_config(config)
++
++      data = ProjectRazor::Data.instance
++      data.check_init
++
++      # Check to make sure it is our config object
++      data.config.admin_port.should == config["admin_port"]
++      data.config.api_port.should == config["api_port"]
++
++
++      # confirm the reverse that nothing is default
++      data.config.admin_port.should_not == default_config.admin_port
++      data.config.api_port.should_not == default_config.api_port
++
++      # confirm default value was loaded for undefined field
++      data.config.image_svc_path.should == default_config.image_svc_path
++      data.config.mk_log_level.should == default_config.mk_log_level
++    end
++
++    it "should load a config (Config::Server) from config path(#{$config_server_path}) on init" do
+       config = default_config
+       config.persist_host = "127.0.0.1"
+       config.persist_mode = :mongo
+@@ -62,9 +88,12 @@ def write_config(config)
+       data.config.admin_port.should_not == default_config.admin_port
+       data.config.api_port.should_not == default_config.api_port
+ 
++      # confirm default value was loaded for undefined field
++      data.config.image_svc_path.should == default_config.image_svc_path
++      data.config.mk_log_level.should == default_config.mk_log_level
+     end
+ 
+-    it "should create a default config object and new config file if there is none at default path" do
++    it "should create a default config object if there is none at default path" do
+       # Delete the existing file
+       File.delete($config_server_path) if File.exists?($config_server_path)
+       File.exists?($config_server_path).should == false
+@@ -79,8 +108,6 @@ def write_config(config)
+         data.config.instance_variable_get(iv).should == default_config.instance_variable_get(iv)
+       end
+ 
+-      #Confirm we have our default file
+-      File.exists?($config_server_path).should == true
+       data.persist_ctrl.teardown
+     end
+ 
+-- 
+1.7.10
+

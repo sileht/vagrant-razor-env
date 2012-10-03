@@ -1,0 +1,128 @@
+diff --git a/lib/project_razor/broker/puppet/agent_install.erb b/lib/project_razor/broker/puppet/agent_install.erb
+index a740618..3f8af5a 100644
+--- a/lib/project_razor/broker/puppet/agent_install.erb
++++ b/lib/project_razor/broker/puppet/agent_install.erb
+@@ -62,4 +62,4 @@ function provision_puppet() {
+     exit 0
+ }
+ 
+-provision_puppet
++provision_puppet 2>&1 | tee /tmp/puppet.log
+diff --git a/lib/project_razor/model/base.rb b/lib/project_razor/model/base.rb
+index e36c91e..c742b58 100644
+--- a/lib/project_razor/model/base.rb
++++ b/lib/project_razor/model/base.rb
+@@ -86,6 +86,7 @@ module ProjectRazor
+               @current_state = fsm[@current_state][action]
+             else
+               @current_state = fsm[@current_state][:else]
++              logger.warn "State #{@current_state} is not in the fsm tree for action #{action},:else is used instead"
+             end
+           rescue => e
+             logger.error "FSM ERROR: #{e.message}"
+diff --git a/lib/project_razor/model/debian.rb b/lib/project_razor/model/debian.rb
+index 9882e60..d4d81ee 100644
+--- a/lib/project_razor/model/debian.rb
++++ b/lib/project_razor/model/debian.rb
+@@ -115,9 +115,6 @@ module ProjectRazor
+           when "final"
+             fsm_action(:os_final, :postinstall)
+             return ""
+-          when "source_fix"
+-            fsm_action(:source_fix, :postinstall)
+-            return
+           when "send_ips"
+             #fsm_action(:source_fix, :postinstall)
+             # Grab IP string
+@@ -157,12 +154,14 @@ module ProjectRazor
+           },
+           :postinstall => {
+             :mk_call            => :postinstall,
++            :apt_update_ok      => :postinstall,
++            :apt_update_failed  => :error_catch,
++            :apt_upgrade_ok     => :postinstall,
++            :apt_upgrade_failed => :error_catch,
++            :apt_install_ok     => :postinstall,
++            :apt_install_failed => :error_catch,
+             :boot_call          => :postinstall,
+             :preseed_end        => :postinstall,
+-            :source_fix         => :postinstall,
+-            :apt_get_update     => :postinstall,
+-            :apt_get_upgrade    => :postinstall,
+-            :apt_get_ruby       => :postinstall,
+             :postinstall_inject => :postinstall,
+             :os_boot            => :postinstall,
+             :os_final           => :os_complete,
+diff --git a/lib/project_razor/model/debian/wheezy/os_boot.erb b/lib/project_razor/model/debian/wheezy/os_boot.erb
+index 33435d6..d51fb90 100644
+--- a/lib/project_razor/model/debian/wheezy/os_boot.erb
++++ b/lib/project_razor/model/debian/wheezy/os_boot.erb
+@@ -1,9 +1,15 @@
+ #!/bin/bash
+ 
+-# This is a patch for lack of DNS in my lab (Not needed if you have proper DNS, .nick)
+-sed -i '4 i\
+-192.168.99.50   puppet learn puppet.razor-dev.local learn.razor-dev.local' /etc/hosts
+-[ "$?" -eq 0 ] && curl <%= callback_url("postinstall", "added_puppet_hosts_ok") %> || curl <%= callback_url("postinstall", "added_puppet_hosts_fail") %>
++check_status(){
++	status=$?
++	step="$1"
++	if [ "$status" -eq 0 ]; then
++		curl -silent "<%= callback_url("postinstall", "") %>"$step"_ok"
++	else
++		curl -silent "<%= callback_url("postinstall", "") %>"$step"_failed"
++		exit 1
++	fi
++}
+ 
+ hostname <%= hostname %>
+ echo <%= hostname %> > /etc/hostname
+@@ -14,22 +20,17 @@ echo <%= hostname %> > /etc/hostname
+ # be resolved properly).  A backup of the original file will be left in place
+ # in the /etc/hosts- file
+ cp -p /etc/hosts /etc/hosts-
+-grep '^127\.0\.0\.1.*' /etc/hosts- > /etc/hosts
+-grep -v '^127\.0\.0\.1.*' /etc/hosts- | grep '^127\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}.*' | head -1 | sed 's/^\(127\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\)\([[:blank:]]\{1,\}\)\(.*\)$/\1\2'<%= hostname %>.<%= domainname %>'\2'<%= hostname %>'/' >> /etc/hosts
+-grep -v '^127\.0\.0\.1.*' /etc/hosts- | grep '^127\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}.*' | tail -n +2 >> /etc/hosts
+-grep -v '^127\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}.*' /etc/hosts- >> /etc/hosts
++sed -i -e '/^127\.0\.1\.1/s/.*/127.0.1.1	<%= hostname %>.<%= domainname %>	<%= hostname %>/' /etc/hosts
++check_status "set_hostname"
+ 
+-[ "$?" -eq 0 ] && curl <%= callback_url("postinstall", "set_hostname_ok") %> || curl <%= callback_url("postinstall", "set_hostname_fail") %>
+-
+-sed -i 's_<%= config.image_svc_host %>:<%= config.image_svc_port %>/razor/image/os/<%= @image_uuid %>_archive.ubuntu.com/ubuntu_g' /etc/apt/sources.list && <%= callback_url("postinstall", "sources_fix") %>
+ apt-get -y update
+-[ "$?" -eq 0 ] && curl <%= callback_url("postinstall", "apt_update_ok") %> || curl <%= callback_url("postinstall", "apt_update_fail") %>
++check_status "apt_update"
+ 
+ apt-get -y upgrade
+-[ "$?" -eq 0 ] && curl <%= callback_url("postinstall", "apt_upgrade_ok") %> || curl <%= callback_url("postinstall", "apt_upgrade_fail") %>
++check_status "apt_upgrade"
+ 
+-apt-get -y install rubygems facter
+-[ "$?" -eq 0 ] && curl <%= callback_url("postinstall", "apt_install_ok") %> || curl <%= callback_url("postinstall", "apt_install_fail") %>
++apt-get -y install rubygems facter 
++check_status "apt_install"
+ 
+ # Get current IP
+ node_ip=`facter ipaddress`
+@@ -37,5 +38,6 @@ node_ip=`facter ipaddress`
+ curl <%= callback_url("postinstall", "send_ips") %>/$node_ip
+ # get final script
+ curl <%= callback_url("postinstall", "boot") %> | sh
++
+ # Send final state
+ curl <%= callback_url("postinstall", "final") %> &
+\ No newline at end of file
+diff --git a/lib/project_razor/model/debian/wheezy/preseed.erb b/lib/project_razor/model/debian/wheezy/preseed.erb
+index 56a2d84..150a467 100644
+--- a/lib/project_razor/model/debian/wheezy/preseed.erb
++++ b/lib/project_razor/model/debian/wheezy/preseed.erb
+@@ -52,6 +52,6 @@ d-i preseed/late_command string  \
+ wget <%= api_svc_uri %>/policy/callback/<%= policy_uuid %>/preseed/end; \
+ wget <%= api_svc_uri %>/policy/callback/<%= policy_uuid %>/postinstall/inject -O /target/usr/local/bin/razor_postinstall.sh;  \
+ sed -i '/exit 0/d' /target/etc/rc.local;  \
+-echo bash /usr/local/bin/razor_postinstall.sh >> /target/etc/rc.local; \
++echo 'bash /usr/local/bin/razor_postinstall.sh 2>&1 | tee /tmp/razor_postinstall.log' >> /target/etc/rc.local; \
+ echo exit 0 >> /target/etc/rc.local;  \
+ chmod +x /target/usr/local/bin/razor_postinstall.sh

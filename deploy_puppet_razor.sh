@@ -28,6 +28,30 @@ mysql -e "grant all on puppet.* to 'puppet'@'localhost' identified by 'password'
 
 echo '*' > /etc/puppet/autosign.conf
 
+# NOT IN WIKI PART #
+cat > /etc/puppet/fileserver.conf <<EOF
+# This file consists of arbitrarily named sections/modules
+# defining where files are served from and to whom
+
+# Define a section 'files'
+# Adapt the allow/deny settings to your needs. Order
+# for allow/deny does not matter, allow always takes precedence
+# over deny
+[files]
+path /etc/puppet/files
+allow *
+#  allow *.example.com
+#  deny *.evil.example.com
+#  allow 192.168.0.0/24
+
+[plugins]
+#  allow *.example.com
+#  deny *.evil.example.com
+#  allow 192.168.0.0/24
+EOF
+# END OF NOT IN WIKI PART #
+
+
 cd /etc/puppet/modules
 git clone git://git.labs.enovance.com/puppet.git .
 git checkout openstack

@@ -5,6 +5,7 @@ $eth0_prefix = "10.0.2"
 $eth1_prefix = "192.168.100"
 $eth1_prefix_reverse = "100.168.192"
 $gateway = "192.168.100.2" # ip du controller
+$aptproxy = "192.168.100.1" # ip du controller
 $password = 'password'
 
 $instances_per_server = {
@@ -98,7 +99,7 @@ node /^puppet/ inherits controller_base {
         tag_matcher  => [
         { 'key'     => 'macaddress_eth1',
             'compare' => 'equal',
-            'value'   => '08:00:27:64:9B:24',
+            'value'   => '08:00:27:64:9B:18',
             'inverse' => "false",
         } ],
     }
@@ -228,6 +229,8 @@ node controller_base inherits base {
 127.0.0.1   localhost
 <%= ipaddress_eth1 %> <%= fqdn %> <%= hostname %> puppet.<%= domain %> puppet
 
+<%= aptproxy %> apt-cacher-ng
+
 <% instances_per_server.each do |name, nb| (Range.new(1,nb.to_i)).each do |i| -%>
 <%= eth1_prefix %>.<%= server_subprefix[name] %><%= i %> <%= name %>-adm-<%= i %>.<%= ceph_domain %> <%= name %>-adm-<%= i %>
 <% end end -%>
@@ -263,7 +266,7 @@ Host *
         content => "
 #!/bin/sh
 echo 1 > /proc/sys/net/ipv4/ip_forward
-/sbin/iptabless -t nat -A POSTROUTING -s ${eth1_prefix}.0/24 ! -d ${eth1_prefix}.0/24 -j MASQUERADE'
+/sbin/iptables -t nat -A POSTROUTING -s ${eth1_prefix}.0/24 ! -d ${eth1_prefix}.0/24 -j MASQUERADE
 exit 0
 "
     }
@@ -312,8 +315,11 @@ exit 0
 	}
 }
 
+#
+# CEPH 
+# 
 class ceph(
-    $radosgw = false,
+    $rgw = false,
 ){
 
     # common part
@@ -329,12 +335,15 @@ class ceph(
     package {"librados2": ensure => latest, require => Apt::Source["ceph-repo"] }
     package {"libcephfs1": ensure => latest, require => Apt::Source["ceph-repo"] }
 
-    if $radosgw {
+    if $rgw {
 
         package {"radosgw": ensure => latest, require => Apt::Source["ceph-repo"] }
         package {"apache2": }
         package {"libapache2-mod-fastcgi": 
-            require => Package["apache2"],
+            require => [ 
+                Package["apache2"],
+                Apt::Source["debian_addons"],
+            ],
             notify => Service["apache2"],
         }
 
@@ -342,6 +351,7 @@ class ceph(
             require => Package["apache2"],
         }
         file { '/etc/apache2/sites-available/radosgw':
+            require => Package["apache2"],
             content => '
 <VirtualHost *:80>
         ServerName ceph1.fqdn.tld
@@ -376,6 +386,7 @@ class ceph(
 exec /usr/bin/radosgw -c /etc/ceph/ceph.conf -n client.radosgw.gateway
 ',
             mode => 755,
+            require => Package["apache2"],
         }
 
         exec {'/usr/sbin/a2enmod rewrite fastcgi':

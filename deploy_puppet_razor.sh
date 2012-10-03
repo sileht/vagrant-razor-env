@@ -68,7 +68,7 @@ git checkout master
 
 # pending razor fix
 curl https://github.com/puppetlabs/puppetlabs-razor/pull/48.patch | git am
-curl https://github.com/puppetlabs/puppetlabs-razor/pull/64.patch | git am
+curl https://github.com/puppetlabs/puppetlabs-razor/pull/65.patch | git am
 patch -p1 < /vagrant/puppet_razor_broker_desc.patch # < not in wiki waiting for upstream fix in 48.patch
 
 cd - 
